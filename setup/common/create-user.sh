@@ -202,6 +202,12 @@ export EDITOR="nano"
 export DO_NOT_TRACK=1
 export NEXT_TELEMETRY_DISABLED=1
 [ -f "${HOME}/.cargo/env" ] && . "${HOME}/.cargo/env"
+
+# mise-managed runtimes (node, etc) — shims work in all contexts
+# (interactive, su -c, systemd); activate adds shell hooks for interactive use
+if [ -d "${HOME}/.local/share/mise/shims" ]; then
+    export PATH="${HOME}/.local/share/mise/shims:${PATH}"
+fi
 command -v mise >/dev/null 2>&1 && eval "$(mise activate bash 2>/dev/null)"
 
 # Source secrets last
@@ -210,6 +216,23 @@ if [ -f "${HOME}/.env" ]; then
 fi
 PROFILE_EOF
     info ".profile updated with PATH and environment baseline"
+fi
+
+# ---------------------------------------------------------------------------
+# .bash_profile — ensure it sources .profile
+# ---------------------------------------------------------------------------
+# Arch's /etc/skel/.bash_profile only sources .bashrc, skipping .profile
+# entirely. Bash login shells read .bash_profile and stop — so our PATH,
+# env vars, and mise setup in .profile would never load.
+BASH_PROFILE="${HOME_DIR}/.bash_profile"
+if [[ -f "$BASH_PROFILE" ]] && ! grep -q '\.profile' "$BASH_PROFILE"; then
+    sed -i '1a\\n# Source .profile for PATH and environment setup\n[[ -f ~/.profile ]] \&\& . ~/.profile\n' "$BASH_PROFILE"
+    chown "${USERNAME}:${USERNAME}" "$BASH_PROFILE"
+    info ".bash_profile patched to source .profile"
+elif [[ -f "$BASH_PROFILE" ]]; then
+    skip ".bash_profile already sources .profile"
+else
+    skip "No .bash_profile (login shell will read .profile directly)"
 fi
 
 # ---------------------------------------------------------------------------
