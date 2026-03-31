@@ -49,20 +49,23 @@ setup_node() {
         local mise_bin
         mise_bin="$(command -v mise 2>/dev/null || echo /usr/bin/mise)"
 
-        # Activate mise in current shell
-        eval "$("$mise_bin" activate bash 2>/dev/null)" || true
+        # Add shims to PATH first (works even if activate fails)
+        local mise_shims="${HOME}/.local/share/mise/shims"
+        [[ -d "$mise_shims" ]] && export PATH="${mise_shims}:${PATH}"
 
-        # Install node LTS
+        eval "$("$mise_bin" activate bash 2>/dev/null)" || true
         "$mise_bin" use --global node@lts 2>&1
 
-        # Re-activate to pick up the new install
+        # Re-add shims (install may have created the dir)
+        [[ -d "$mise_shims" ]] && export PATH="${mise_shims}:${PATH}"
         eval "$("$mise_bin" activate bash 2>/dev/null)" || true
 
         if command -v node &>/dev/null && command -v npm &>/dev/null; then
             ok "Node.js $(node --version) + npm $(npm --version) (via mise)"
             return 0
         fi
-        warn "mise install succeeded but node/npm not in PATH"
+        warn "mise installed node but node/npm still not in PATH"
+        fatal "Fix: add ${mise_shims} to PATH or check 'mise doctor'"
     fi
 
     # 3. Fallback: system node exists but npm is missing (bare Arch nodejs pkg)

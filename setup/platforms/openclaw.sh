@@ -48,8 +48,16 @@ setup_node() {
         info "Installing Node.js LTS via mise..."
         local mise_bin
         mise_bin="$(command -v mise 2>/dev/null || echo /usr/bin/mise)"
+
+        # Add shims to PATH first (works even if activate fails)
+        local mise_shims="${HOME}/.local/share/mise/shims"
+        [[ -d "$mise_shims" ]] && export PATH="${mise_shims}:${PATH}"
+
         eval "$("$mise_bin" activate bash 2>/dev/null)" || true
         "$mise_bin" use --global node@lts 2>&1
+
+        # Re-add shims (install may have created the dir)
+        [[ -d "$mise_shims" ]] && export PATH="${mise_shims}:${PATH}"
         eval "$("$mise_bin" activate bash 2>/dev/null)" || true
 
         if command -v node &>/dev/null && command -v npm &>/dev/null; then
@@ -57,7 +65,8 @@ setup_node() {
             ok "npm prefix: $(npm prefix -g)"
             return 0
         fi
-        warn "mise install succeeded but node/npm not in PATH — trying other methods"
+        warn "mise installed node but node/npm still not in PATH"
+        fatal "Fix: add ${mise_shims} to PATH or check 'mise doctor'"
     fi
 
     # 3. fnm (faster than nvm, no unbound var issues)
