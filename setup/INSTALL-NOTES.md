@@ -92,6 +92,7 @@ These notes drove the script rewrites.
 
 ### Install
 - Clone repo, `npm install` (6 deps, better-sqlite3 needs gcc/make)
+- Node.js via mise (preferred), falling back to system node+npm
 - `npm run build` → `node dist/index.js` (preferred over tsx)
 - Docker image: `cd container && bash build.sh` → `nanoclaw-agent:latest`
 
@@ -140,9 +141,9 @@ These notes drove the script rewrites.
 - DM pairing code for Telegram
 
 ### Systemd
-- Use absolute path to openclaw binary (survives nvm/fnm version changes)
-- PATH must include node bin dir
-- Prefer fnm over nvm (no unbound variable issues)
+- Use absolute path to openclaw binary (survives nvm/fnm/mise version changes)
+- PATH must include node bin dir and mise shims
+- Prefer mise over fnm over nvm
 
 ---
 
@@ -161,16 +162,33 @@ The `install.sh` Phase 1 (host dependencies) is now distro-aware. Detected via `
 
 **Package mapping:**
 
-| Purpose | Debian | Arch |
-|---------|--------|------|
-| Docker | `docker.io` | `docker` |
-| Node.js | nodesource PPA (node_22.x) | `nodejs npm` (official repos) |
-| git, curl | same | same |
-| psql (optional) | `postgresql-client` | `postgresql` (includes psql) |
+| Purpose | Debian | Arch | Arch + Omarchy |
+|---------|--------|------|----------------|
+| Docker | `docker.io` | `docker` | already installed |
+| Node.js | nodesource PPA (node_22.x) | `nodejs npm` (official repos) | skipped — mise per-user |
+| git, curl | same | same | already installed |
+| psql (optional) | `postgresql-client` | `postgresql` (includes psql) | skipped — docker exec fallback |
+
+### Omarchy Compatibility (added 2026-03-31)
+
+Omarchy is auto-detected via `omarchy-update` on PATH or `~/.local/share/omarchy/` dirs.
+
+**Key behaviors on Omarchy:**
+- `pacman -Syu --noconfirm` is **skipped** — Omarchy bundles config migrations with updates; use `omarchy-update` instead
+- `pacman -S nodejs npm` is **skipped** — conflicts with mise-managed runtimes and can break future `pacman -Syu` if `npm install -g` is ever used
+- `pacman -S postgresql` is **skipped** — avoids installing a full DB server for an optional CLI tool
+- Platform scripts install Node.js per-user via **mise** (Omarchy's native version manager, available at `/usr/bin/mise`)
+
+**Node.js version management priority (nanoclaw, openclaw):**
+1. mise (Omarchy-native, per-user, clean teardown)
+2. fnm (fast, no unbound var issues)
+3. nvm (curl|bash fallback for non-Omarchy systems)
+
+**`.bash_profile` fix:** Arch's `/etc/skel/.bash_profile` only sources `.bashrc`, skipping `.profile`. `create-user.sh` patches `.bash_profile` to source `.profile` so PATH, env vars, and mise shims are available in login shells.
 
 **Notes:**
 - Arch's `nodejs` in official repos ships a recent Node.js — no external PPA needed (version may be newer than the LTS used on Debian)
 - `postgresql` on Arch includes the client tools (`psql`, `pg_dump`); the service is NOT started automatically
 - `create-user.sh` and all platform scripts (`platforms/*.sh`) work unchanged on Arch
-  — they use `useradd`/`systemctl`/`loginctl` and per-user `fnm`/`nvm`/`curl` installs, which are all distro-agnostic
+  — they use `useradd`/`systemctl`/`loginctl` and per-user `mise`/`fnm`/`nvm`/`curl` installs, which are all distro-agnostic
 - Unknown distros: Phase 1 checks for `systemctl`/`loginctl` and fails immediately if they are absent (Phase 2 requires systemd). If systemd is present, Phase 1 continues as long as Docker/Node/git/curl are already installed — but later phases may still fail if paths or package managers differ. Install platforms manually on unsupported distros.
