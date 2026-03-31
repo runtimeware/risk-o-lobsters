@@ -152,6 +152,36 @@ Both tests were run on `galway` (Ubuntu 24.04 host, libvirt provider).
 
 ---
 
+## Omarchy (Arch + mise) Compatibility
+
+Omarchy is an opinionated Arch Linux desktop that manages runtimes via
+[mise](https://mise.jdx.dev/) and packages via `omarchy-update`. The setup
+scripts detect Omarchy automatically and adjust their behavior:
+
+| Area | Plain Arch | Omarchy |
+|------|-----------|---------|
+| **System upgrade** | `pacman -Syu --noconfirm` | Skipped — use `omarchy-update` |
+| **Node.js / npm** | `pacman -S nodejs npm` | Skipped — platform scripts install per-user via mise |
+| **PostgreSQL (psql)** | `pacman -S postgresql` (full server) | Skipped — `docker exec` fallback used |
+| **Docker, git, curl** | Installed if missing | Same (already present on Omarchy) |
+
+### Why not pacman for Node.js?
+
+- Omarchy deliberately uses mise, not pacman, for runtimes
+- `pacman -S npm` creates a system-wide npm that conflicts with mise
+- If anyone runs `npm install -g` with the pacman npm, it writes files
+  outside pacman's tracking and **breaks future `pacman -Syu`**
+- Platform users (nancy, ollie) get their own mise-managed node — clean
+  teardown when `userdel -r` removes their home directory
+
+### Detection
+
+Omarchy is detected when `omarchy-update` is on PATH or
+`~/.local/share/omarchy/` exists for any user. When detected, `install.sh`
+prints `[DISTRO] arch (Omarchy detected)`.
+
+---
+
 ## Supported Linux Distros
 
 The setup scripts now support:
@@ -160,6 +190,7 @@ The setup scripts now support:
 |--------|---------|
 | **Debian/Ubuntu** | Ubuntu, Debian, Linux Mint, Pop!_OS, elementary OS, Kali |
 | **Arch** | Arch Linux, Manjaro, EndeavourOS, CachyOS, Garuda |
+| **Arch + Omarchy** | Full support with mise-based node isolation |
 
 Any distro that declares itself Arch-based via `/etc/os-release` is supported.
 
@@ -167,8 +198,8 @@ Any distro that declares itself Arch-based via `/etc/os-release` is supported.
 
 ## What Doesn't Change
 
-- **`create-user.sh`** — works identically on all distros (uses standard Linux tools: `useradd`, `systemctl`, `loginctl`)
-- **Platform scripts** (`platforms/*.sh`) — all distro-agnostic; they use per-user package managers (`fnm`, `nvm`, `curl`) that don't depend on the system package manager
+- **`create-user.sh`** — works identically on all distros (uses standard Linux tools: `useradd`, `systemctl`, `loginctl`). On systems with mise, it also activates mise in the user's `.profile`.
+- **Platform scripts** (`platforms/*.sh`) — all distro-agnostic; they use per-user version managers (`mise`, `fnm`, `nvm`, `curl`) that don't depend on the system package manager
 
 ---
 

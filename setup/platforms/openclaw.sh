@@ -32,7 +32,35 @@ version_gte() {
 # ── Setup Node.js ────────────────────────────────────────────────────────────
 
 setup_node() {
-    # Prefer fnm over nvm (faster, simpler, no unbound var issues)
+    # 1. Already available (prior run, system install, or pre-activated mise)
+    if command -v node &>/dev/null && command -v npm &>/dev/null; then
+        local node_major
+        node_major="$(node --version | sed 's/v\([0-9]*\).*/\1/')"
+        if (( node_major >= 20 )); then
+            ok "Node.js $(node --version) + npm $(npm --version)"
+            ok "npm prefix: $(npm prefix -g)"
+            return 0
+        fi
+    fi
+
+    # 2. Prefer mise (Omarchy-native, per-user, clean teardown on userdel -r)
+    if command -v mise &>/dev/null || [[ -x /usr/bin/mise ]]; then
+        info "Installing Node.js LTS via mise..."
+        local mise_bin
+        mise_bin="$(command -v mise 2>/dev/null || echo /usr/bin/mise)"
+        eval "$("$mise_bin" activate bash 2>/dev/null)" || true
+        "$mise_bin" use --global node@lts 2>&1
+        eval "$("$mise_bin" activate bash 2>/dev/null)" || true
+
+        if command -v node &>/dev/null && command -v npm &>/dev/null; then
+            ok "Node.js $(node --version) + npm $(npm --version) (via mise)"
+            ok "npm prefix: $(npm prefix -g)"
+            return 0
+        fi
+        warn "mise install succeeded but node/npm not in PATH — trying other methods"
+    fi
+
+    # 3. fnm (faster than nvm, no unbound var issues)
     if command -v fnm &>/dev/null; then
         info "Using fnm for Node.js management"
         eval "$(fnm env --shell bash 2>/dev/null)" || true
@@ -50,7 +78,7 @@ setup_node() {
         fi
     fi
 
-    # Fallback: nvm
+    # 4. Fallback: nvm
     # Pin to ~/.nvm explicitly — don't inherit env or let XDG_CONFIG_HOME redirect
     # nvm's installer uses XDG_CONFIG_HOME if NVM_DIR is unset, which would put
     # nvm in ~/.config/nvm instead. We mkdir first so the installer doesn't bail
@@ -68,7 +96,7 @@ setup_node() {
 
     if ! command -v nvm &>/dev/null; then
         set -u
-        fatal "Neither fnm nor nvm available"
+        fatal "No Node.js version manager available (tried mise, fnm, nvm)"
     fi
 
     if ! nvm ls --no-colors lts/* &>/dev/null; then
@@ -133,10 +161,13 @@ install_service() {
     local svc_dir="${HOME}/.config/systemd/user"
     mkdir -p "$svc_dir"
 
-    # Get ABSOLUTE paths (survives nvm/fnm version changes if pinned)
+    # Get ABSOLUTE paths (survives nvm/fnm/mise version changes if pinned)
     local openclaw_bin node_bin_dir
     openclaw_bin="$(command -v openclaw)"
     node_bin_dir="$(dirname "$(command -v node)")"
+
+    # Include mise shims in PATH for mise-managed node
+    local svc_path="${node_bin_dir}:%h/.local/share/mise/shims:%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
 
     cat > "${svc_dir}/openclaw.service" <<EOF
 [Unit]
@@ -150,7 +181,7 @@ ExecStart=${openclaw_bin}
 Restart=on-failure
 RestartSec=10
 EnvironmentFile=%h/.env
-Environment=PATH=${node_bin_dir}:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=${svc_path}
 Environment=NODE_ENV=production
 
 # Hardening

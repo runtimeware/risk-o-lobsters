@@ -202,6 +202,7 @@ export EDITOR="nano"
 export DO_NOT_TRACK=1
 export NEXT_TELEMETRY_DISABLED=1
 [ -f "${HOME}/.cargo/env" ] && . "${HOME}/.cargo/env"
+command -v mise >/dev/null 2>&1 && eval "$(mise activate bash 2>/dev/null)"
 
 # Source secrets last
 if [ -f "${HOME}/.env" ]; then

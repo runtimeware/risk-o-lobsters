@@ -308,7 +308,17 @@ else
     }
 
     DISTRO="$(detect_distro)"
-    echo -e "  ${CYAN}[DISTRO]${NC} ${DISTRO}"
+
+    # ── Omarchy detection ───────────────────────────────────────────────
+    # Omarchy manages packages via omarchy-update (which runs migrations
+    # alongside pacman). Running pacman directly risks missing config
+    # migrations and conflicts with mise-managed runtimes (node, etc).
+    OMARCHY=false
+    if command -v omarchy-update &>/dev/null || [[ -d /home/*/.local/share/omarchy ]] 2>/dev/null; then
+        OMARCHY=true
+    fi
+
+    echo -e "  ${CYAN}[DISTRO]${NC} ${DISTRO}$(${OMARCHY} && echo ' (Omarchy detected)')"
 
     # ── Debian: repair broken dpkg state before any apt calls ────────────
     if [[ "$DISTRO" == "debian" ]]; then
@@ -358,7 +368,10 @@ else
     # Surface the error rather than swallowing it: a failed upgrade leaves
     # the host in an undefined state that will cause unpredictable failures.
     if [[ "$DISTRO" == "arch" ]]; then
-        if ! pacman -Syu --noconfirm; then
+        if $OMARCHY; then
+            echo -e "  ${YELLOW}[SKIP]${NC} Skipping pacman -Syu — Omarchy detected"
+            echo -e "         Use ${BOLD}omarchy-update${NC} to upgrade system packages safely"
+        elif ! pacman -Syu --noconfirm; then
             echo -e "  ${YELLOW}[WARN]${NC} pacman -Syu failed — host may be in a partial-upgrade state"
             host_ok=false
         fi
@@ -439,7 +452,17 @@ else
     fi
 
     # Node.js
-    if command -v node &>/dev/null; then
+    # On Omarchy, platform scripts install node per-user via mise (the
+    # Omarchy-native version manager). Don't install system nodejs/npm —
+    # it conflicts with mise and breaks pacman -Syu if npm install -g is
+    # ever used. On plain Arch/Debian, install system-wide as before.
+    if $OMARCHY; then
+        if command -v node &>/dev/null; then
+            echo -e "  ${GREEN}[OK]${NC} Node.js $(node --version) (mise-managed — skipping system install)"
+        else
+            echo -e "  ${YELLOW}[SKIP]${NC} Node.js — Omarchy detected; platform scripts install node per-user via mise"
+        fi
+    elif command -v node &>/dev/null; then
         echo -e "  ${GREEN}[OK]${NC} Node.js $(node --version)"
     else
         echo -e "  ${CYAN}[INSTALL]${NC} Node.js..."
@@ -493,12 +516,17 @@ else
         echo -e "  ${CYAN}[INSTALL]${NC} postgresql client..."
         case "$DISTRO" in
             arch)
-                # On Arch, psql is bundled in the 'postgresql' package.
-                # 'postgresql-libs' provides libpq only — no psql binary.
-                # Install the full package; don't start the service.
-                pacman -S --noconfirm --needed postgresql 2>/dev/null \
-                    && echo -e "  ${GREEN}[OK]${NC} psql installed" \
-                    || echo -e "  ${YELLOW}[WARN]${NC} psql install failed (optional — docker exec will be used)"
+                # On Arch, psql is bundled in the full 'postgresql' package
+                # (postgresql-libs only provides libpq). Skip on Omarchy to
+                # avoid installing a full DB server for an optional CLI tool;
+                # docker exec is the fallback for DB verification.
+                if $OMARCHY; then
+                    echo -e "  ${YELLOW}[SKIP]${NC} psql — skipping full postgresql package on Omarchy (docker exec will be used)"
+                else
+                    pacman -S --noconfirm --needed postgresql 2>/dev/null \
+                        && echo -e "  ${GREEN}[OK]${NC} psql installed" \
+                        || echo -e "  ${YELLOW}[WARN]${NC} psql install failed (optional — docker exec will be used)"
+                fi
                 ;;
             debian)
                 apt-get install -y -qq --no-install-recommends postgresql-client 2>/dev/null \

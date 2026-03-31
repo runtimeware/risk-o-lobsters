@@ -30,30 +30,56 @@ ok()    { printf '\033[1;32m[OK]\033[0m    %s\n' "$*"; }
 warn()  { printf '\033[1;33m[WARN]\033[0m  %s\n' "$*"; }
 fatal() { printf '\033[1;31m[FAIL]\033[0m  %s\n' "$*" >&2; exit 1; }
 
+# ── Setup Node.js via mise (preferred), falling back to system ───────────────
+
+setup_node() {
+    # 1. If node+npm already available (system install, or mise already set up)
+    if command -v node &>/dev/null && command -v npm &>/dev/null; then
+        local node_major
+        node_major="$(node --version | sed 's/v\([0-9]*\).*/\1/')"
+        if (( node_major >= 20 )); then
+            ok "Node.js $(node --version) + npm $(npm --version)"
+            return 0
+        fi
+    fi
+
+    # 2. Try mise (Omarchy-native, per-user, clean teardown on userdel -r)
+    if command -v mise &>/dev/null || [[ -x /usr/bin/mise ]]; then
+        info "Installing Node.js LTS via mise..."
+        local mise_bin
+        mise_bin="$(command -v mise 2>/dev/null || echo /usr/bin/mise)"
+
+        # Activate mise in current shell
+        eval "$("$mise_bin" activate bash 2>/dev/null)" || true
+
+        # Install node LTS
+        "$mise_bin" use --global node@lts 2>&1
+
+        # Re-activate to pick up the new install
+        eval "$("$mise_bin" activate bash 2>/dev/null)" || true
+
+        if command -v node &>/dev/null && command -v npm &>/dev/null; then
+            ok "Node.js $(node --version) + npm $(npm --version) (via mise)"
+            return 0
+        fi
+        warn "mise install succeeded but node/npm not in PATH"
+    fi
+
+    # 3. Fallback: system node exists but npm is missing (bare Arch nodejs pkg)
+    if command -v node &>/dev/null && ! command -v npm &>/dev/null; then
+        fatal "Node.js found but npm is missing — install npm (pacman -S npm) or mise (mise use node@lts)"
+    fi
+
+    fatal "Node.js 20+ not found — install via mise (mise use --global node@lts) or system package manager"
+}
+
 # ── Pre-flight ───────────────────────────────────────────────────────────────
 
 preflight() {
     info "Checking prerequisites..."
 
-    # Node.js
-    if command -v node &>/dev/null; then
-        local node_major
-        node_major="$(node --version | sed 's/v\([0-9]*\).*/\1/')"
-        if (( node_major >= 20 )); then
-            ok "Node.js $(node --version)"
-        else
-            fatal "Node.js $(node --version) too old — need 20+"
-        fi
-    else
-        fatal "Node.js not found — install Node.js 20+ first"
-    fi
-
-    # npm
-    if command -v npm &>/dev/null; then
-        ok "npm $(npm --version)"
-    else
-        fatal "npm not found"
-    fi
+    # Node.js + npm (installs via mise if needed)
+    setup_node
 
     # Docker
     if command -v docker &>/dev/null && docker info &>/dev/null; then
@@ -183,9 +209,12 @@ install_service() {
         exec_start="${npx_path} tsx ${INSTALL_DIR}/src/index.ts"
     fi
 
-    # Find node's bin dir for PATH
+    # Find node's bin dir for PATH (may be mise-managed or system)
     local node_bin_dir
     node_bin_dir="$(dirname "$(command -v node)")"
+
+    # Build PATH that includes mise shims if mise is managing node
+    local svc_path="${node_bin_dir}:%h/.local/share/mise/shims:%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
 
     cat > "${svc_dir}/nanoclaw.service" <<EOF
 [Unit]
@@ -200,7 +229,7 @@ ExecStart=${exec_start}
 Restart=on-failure
 RestartSec=10
 EnvironmentFile=%h/.env
-Environment=PATH=${node_bin_dir}:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=${svc_path}
 Environment=NODE_ENV=production
 
 # Hardening
